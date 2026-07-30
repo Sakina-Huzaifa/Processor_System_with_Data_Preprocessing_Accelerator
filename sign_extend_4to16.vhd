@@ -42,3 +42,5 @@ begin
         end loop;
 
     end process;
+
+end behavioral;
