@@ -68,13 +68,19 @@ entity pipelined_core is
         an       : out std_logic_vector(3 downto 0);
         
         -- Coprocessor interface
-        cop_start : out std_logic;
-        cop_op    : out std_logic_vector(1 downto 0);
-        cop_dst   : out std_logic_vector(7 downto 0);
-        cop_srcB  : out std_logic_vector(7 downto 0);
-        cop_srcC  : out std_logic_vector(7 downto 0);
-        cop_size  : out std_logic_vector(7 downto 0);
-        cop_done  : in  std_logic
+        cop_start    : out std_logic;
+        cop_op       : out std_logic_vector(1 downto 0);
+        cop_dst      : out std_logic_vector(7 downto 0);
+        cop_srcB     : out std_logic_vector(7 downto 0);
+        cop_srcC     : out std_logic_vector(7 downto 0);
+        cop_size     : out std_logic_vector(7 downto 0);
+        cop_done     : in  std_logic;
+          
+        cop_busy         : in  std_logic;
+        cop_addr_in      : in  std_logic_vector(3 downto 0);
+        cop_write_data   : in  std_logic_vector(15 downto 0);
+        cop_write_enable : in  std_logic
+            
     );
 end pipelined_core;
 
