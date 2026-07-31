@@ -22,7 +22,7 @@ entity memory_transfer is
         reset : in std_logic;
         start : in std_logic;
 
-        imem_addr : out std_logic_vector(7 downto 0);
+        imem_addr : out std_logic_vector(9 downto 0);
         imem_data : in  std_logic_vector(31 downto 0);
         transfer_size : in std_logic_vector(9 downto 0);
 
@@ -36,6 +36,8 @@ entity memory_transfer is
 end memory_transfer;
 
 architecture Behavioral of memory_transfer is
+
+constant SOURCE_BASE : unsigned(9 downto 0) := to_unsigned(256, 10);
 
 signal end_copy : std_logic;
 
@@ -115,11 +117,12 @@ begin
     end case;
 end process;    
 
-imem_addr <= copy_addr(7 downto 0);
+imem_addr <= std_logic_vector(SOURCE_BASE + unsigned(copy_addr));
 dmem_addr <= copy_addr;
 dmem_write_data <= imem_data(15 downto 0);
-end_copy <= '1' when (transfer_size = x"000000000") 
-        OR (unsigned(copy_addr) = unsigned(transfer_size) - 1)
-         else '0';
+end_copy <= '1' when
+                unsigned(transfer_size) = 0
+                or unsigned(copy_addr) = unsigned(transfer_size) - 1
+            else '0';
 
 end Behavioral;

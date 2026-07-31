@@ -24,16 +24,16 @@ library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.numeric_std.ALL;
 
-entity instruction_memory_pipelined is
+entity tb_custom_accelerated is
     port (
         addr_in       : in  std_logic_vector(7 downto 0);
         insn_out      : out std_logic_vector(31 downto 0);
         transfer_addr : in  std_logic_vector(9 downto 0);
         transfer_data : out std_logic_vector(31 downto 0)
     );
-end instruction_memory_pipelined;
+end tb_custom_accelerated;
 
-architecture behavioral of instruction_memory_pipelined is
+architecture behavioral of tb_custom_accelerated is
 
     type mem_array is array (0 to 1023) of std_logic_vector(31 downto 0);
 

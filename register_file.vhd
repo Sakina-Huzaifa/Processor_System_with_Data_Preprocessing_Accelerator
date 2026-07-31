@@ -28,11 +28,15 @@ entity register_file is
            clk             : in  std_logic;
            read_register_a : in  std_logic_vector(3 downto 0);
            read_register_b : in  std_logic_vector(3 downto 0);
+           read_register_c : in  std_logic_vector(3 downto 0);
+           read_register_d : in  std_logic_vector(3 downto 0);
            write_enable    : in  std_logic;
            write_register  : in  std_logic_vector(3 downto 0);
            write_data      : in  std_logic_vector(15 downto 0);
            read_data_a     : out std_logic_vector(15 downto 0);
-           read_data_b     : out std_logic_vector(15 downto 0) );
+           read_data_b     : out std_logic_vector(15 downto 0);
+           read_data_c     : out std_logic_vector(15 downto 0);
+           read_data_d     : out std_logic_vector(15 downto 0) );
 end register_file;
 
 architecture behavioral of register_file is
@@ -46,6 +50,8 @@ begin
                             clk,
                             read_register_a,
                             read_register_b,
+                            read_register_c,
+                            read_register_d,
                             write_enable,
                             write_register,
                             write_data ) is
@@ -53,12 +59,16 @@ begin
     variable var_regfile     : reg_file;
     variable var_read_addr_a : integer;
     variable var_read_addr_b : integer;
+    variable var_read_addr_c : integer;
+    variable var_read_addr_d : integer;
     variable var_write_addr  : integer;
     
     begin
     
         var_read_addr_a := conv_integer(read_register_a);
         var_read_addr_b := conv_integer(read_register_b);
+        var_read_addr_c := conv_integer(read_register_c);
+        var_read_addr_d := conv_integer(read_register_d);
         var_write_addr  := conv_integer(write_register);
         
         if (reset = '1') then
@@ -73,10 +83,11 @@ begin
         -- enforces value zero for register $0
         var_regfile(0) := X"0000";
 
-        -- continuous read of the registers at location read_register_a
-        -- and read_register_b
+        -- continuous read of the four register ports
         read_data_a <= var_regfile(var_read_addr_a); 
         read_data_b <= var_regfile(var_read_addr_b);
+        read_data_c <= var_regfile(var_read_addr_c);
+        read_data_d <= var_regfile(var_read_addr_d);
 
         -- the following are probe signals (for simulation purpose)
         sig_regfile <= var_regfile;

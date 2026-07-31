@@ -79,7 +79,11 @@ entity pipelined_core is
         cop_busy         : in  std_logic;
         cop_addr_in      : in  std_logic_vector(9 downto 0);
         cop_write_data   : in  std_logic_vector(15 downto 0);
-        cop_write_enable : in  std_logic           
+        cop_write_enable : in  std_logic;
+        
+        -- Signals returned to the coprocessor
+        cop_read_data    : out std_logic_vector(15 downto 0);
+        cop_clk_out      : out std_logic
     );
 end pipelined_core;
 
@@ -89,7 +93,7 @@ architecture pipelined of pipelined_core is
     component instruction_memory_pipelined is
         port ( addr_in  : in  std_logic_vector(7 downto 0);
                insn_out : out std_logic_vector(31 downto 0);
-               transfer_addr   : in std_logic_vector(7 downto 0);
+               transfer_addr : in std_logic_vector(9 downto 0);
                transfer_data   : out std_logic_vector(31 downto 0));
     end component;
 
@@ -99,18 +103,25 @@ architecture pipelined of pipelined_core is
                alu_src    : out std_logic; mem_write  : out std_logic;
                mem_to_reg : out std_logic; in_to_reg  : out std_logic;
                out_enable : out std_logic; alu_mode   : out std_logic;
-               branch     : out std_logic; dis_enable : out std_logic );
+               branch     : out std_logic; dis_enable : out std_logic;
+               sub_enable : out std_logic; slt_enable : out std_logic;
+               jump       : out std_logic);
+
     end component;
 
     component register_file is
         port ( reset           : in  std_logic; clk : in std_logic;
                read_register_a : in  std_logic_vector(3 downto 0);
                read_register_b : in  std_logic_vector(3 downto 0);
+               read_register_c : in  std_logic_vector(3 downto 0);
+               read_register_d : in  std_logic_vector(3 downto 0);
                write_enable    : in  std_logic;
                write_register  : in  std_logic_vector(3 downto 0);
                write_data      : in  std_logic_vector(15 downto 0);
                read_data_a     : out std_logic_vector(15 downto 0);
-               read_data_b     : out std_logic_vector(15 downto 0) );
+               read_data_b     : out std_logic_vector(15 downto 0);
+               read_data_c     : out std_logic_vector(15 downto 0);
+               read_data_d     : out std_logic_vector(15 downto 0) );
     end component;
 
     component sign_extend_4to16 is
@@ -132,6 +143,15 @@ architecture pipelined of pipelined_core is
                sat_mode : in std_logic;
                sum   : out std_logic_vector(15 downto 0);
                carry_out : out std_logic );
+    end component;
+
+    component simple_alu is
+        port (
+            src_a  : in  std_logic_vector(15 downto 0);
+            src_b  : in  std_logic_vector(15 downto 0);
+            is_slt : in  std_logic;
+            result : out std_logic_vector(15 downto 0)
+        );
     end component;
 
     component data_memory is
@@ -156,7 +176,7 @@ architecture pipelined of pipelined_core is
             reset : in std_logic;
             start : in std_logic;
     
-            imem_addr : out std_logic_vector(7 downto 0);
+            imem_addr : out std_logic_vector(9 downto 0);
             imem_data : in  std_logic_vector(31 downto 0);
             transfer_size : in std_logic_vector(9 downto 0);
     
@@ -184,6 +204,10 @@ architecture pipelined of pipelined_core is
     constant OP_SPECIAL : std_logic_vector(3 downto 0) := "1111"; -- coprocessor
     constant OP_POLL    : std_logic_vector(3 downto 0) := "1110"; -- read cop_done
 
+    constant OP_SUB : std_logic_vector(3 downto 0) := "1010";
+    constant OP_SLT : std_logic_vector(3 downto 0) := "1011";
+    constant OP_JMP : std_logic_vector(3 downto 0) := "1100";
+
     ---------------------------------------------------------------------------
     -- IF stage signals
     ---------------------------------------------------------------------------
@@ -207,11 +231,15 @@ architecture pipelined of pipelined_core is
     signal sig_out_enable, sig_alu_mode                 : std_logic;
     signal sig_branch, sig_dis_enable                   : std_logic;
     signal sig_rd_a, sig_rd_b  : std_logic_vector(15 downto 0);
+    signal sig_rd_c, sig_rd_d  : std_logic_vector(15 downto 0);
     signal sig_sign_ext        : std_logic_vector(15 downto 0);
     signal sig_wreg_id         : std_logic_vector(3 downto 0);
 
     signal sig_rs_idx : std_logic_vector(3 downto 0);   -- insn[11:8]
     signal sig_rt_idx : std_logic_vector(3 downto 0);   -- insn[7:4]
+
+    signal sig_read_reg_a : std_logic_vector(3 downto 0);
+    signal sig_read_reg_b : std_logic_vector(3 downto 0);
 
     -- ID/EX pipeline register
     signal id_ex_pc_plus_1 : std_logic_vector(7 downto 0)  := (others => '0');
@@ -219,11 +247,15 @@ architecture pipelined of pipelined_core is
     signal id_ex_rd_b      : std_logic_vector(15 downto 0) := (others => '0');
     signal id_ex_sign_ext  : std_logic_vector(15 downto 0) := (others => '0');
     signal id_ex_imme      : std_logic_vector(3 downto 0)  := (others => '0');
+    signal id_ex_jump_target : std_logic_vector(7 downto 0):= (others => '0');
     signal id_ex_wreg      : std_logic_vector(3 downto 0)  := (others => '0');
     signal id_ex_rs_idx    : std_logic_vector(3 downto 0)  := (others => '0');
     signal id_ex_rt_idx    : std_logic_vector(3 downto 0)  := (others => '0');
     signal id_ex_switches  : std_logic_vector(15 downto 0) := (others => '0');
     signal id_ex_reg_write, id_ex_alu_src, id_ex_alu_mode   : std_logic := '0';
+    signal id_ex_sub_enable : std_logic := '0';
+    signal id_ex_slt_enable : std_logic := '0';
+    signal id_ex_jump       : std_logic := '0';
     signal id_ex_mem_write, id_ex_mem_to_reg, id_ex_in_to_reg : std_logic := '0';
     signal id_ex_out_enable, id_ex_branch, id_ex_dis_enable : std_logic := '0';
     signal id_ex_is_poll   : std_logic := '0';  -- NEW: POLL instruction flag
@@ -235,11 +267,17 @@ architecture pipelined of pipelined_core is
     signal sig_alu_b_fwd     : std_logic_vector(15 downto 0); -- forwarded B
     signal sig_alu_b         : std_logic_vector(15 downto 0);
     signal sig_alu_result    : std_logic_vector(15 downto 0);
+    signal sig_simple_result : std_logic_vector(15 downto 0);
+    signal sig_final_result  : std_logic_vector(15 downto 0);
+    signal sig_sub_enable    : std_logic;
+    signal sig_slt_enable    : std_logic;
+    signal sig_jump          : std_logic;
     signal sig_alu_carry     : std_logic;
     signal sig_branch_target : std_logic_vector(7 downto 0);
     signal sig_br_carry      : std_logic;
     signal sig_not_equal     : std_logic;
     signal sig_branch_taken  : std_logic;
+    signal sig_control_redirect : std_logic;
 
     -- forwarding select signals (2-bit each)
     -- "00" = use register file value (no hazard)
@@ -301,7 +339,7 @@ architecture pipelined of pipelined_core is
     signal sig_transfer_busy        : std_logic;
     signal sig_transfer_done        : std_logic ;
     
-    signal sig_transfer_imem_addr   : std_logic_vector(7 downto 0);
+    signal sig_transfer_imem_addr   : std_logic_vector(9 downto 0);
     signal sig_transfer_imem_data   : std_logic_vector(31 downto 0);
 
 begin
@@ -342,9 +380,11 @@ begin
     --   1. Branch taken redirect to branch target(highest priority)
     --   2. Load-use stall hold current PC(freeze)
     --   3. Normal PC + 1
-    sig_pc_next <= sig_branch_target when sig_branch_taken = '1' else
-                   sig_pc            when sig_stall = '1'        else
-                   sig_pc_plus_1;
+    sig_pc_next <= sig_pc            when sig_transfer_done = '0' else
+                id_ex_jump_target when id_ex_jump = '1' else
+                sig_branch_target when sig_branch_taken = '1' else
+                sig_pc            when sig_stall = '1' else
+                sig_pc_plus_1;
 
     pc_register : process(reset, sig_slow_clk)
     begin
@@ -369,7 +409,7 @@ begin
         port map ( clk             => sig_slow_clk,
             reset           => reset,
             start           => '1',
-            transfer_size   => "0000000100", -- temp value for test purpose
+            transfer_size   => "0000110000", -- temp value for test purpose
         
             imem_addr       => sig_transfer_imem_addr,
             imem_data       => sig_transfer_imem_data,
@@ -391,7 +431,7 @@ begin
             if_id_insn      <= (others => '0');
             if_id_pc_plus_1 <= (others => '0');
         elsif rising_edge(sig_slow_clk) then
-            if sig_branch_taken = '1' then
+            if sig_control_redirect = '1' then
                 -- SQUASH: branch taken, discard fetched instruction NOP
                 if_id_insn      <= (others => '0');
                 if_id_pc_plus_1 <= (others => '0');
@@ -423,21 +463,39 @@ begin
             alu_src    => sig_alu_src,    mem_write  => sig_mem_write,
             mem_to_reg => sig_mem_to_reg, in_to_reg  => sig_in_to_reg,
             out_enable => sig_out_enable, alu_mode   => sig_alu_mode,
-            branch     => sig_branch,     dis_enable => sig_dis_enable
+            branch     => sig_branch,     dis_enable => sig_dis_enable,
+            sub_enable => sig_sub_enable,
+            slt_enable => sig_slt_enable,
+            jump       => sig_jump
         );
+
+    
+    sig_read_reg_a <= "0011"
+        when if_id_insn(15 downto 12) = OP_SPECIAL
+        else if_id_insn(11 downto 8);
+
+    sig_read_reg_b <= "0001"
+        when if_id_insn(15 downto 12) = OP_SPECIAL
+        else if_id_insn(7 downto 4);
 
     -- Register file
     reg_file : register_file
         port map (
             reset           => reset,
             clk             => sig_slow_clk,
-            read_register_a => if_id_insn(11 downto 8),   -- Rs
-            read_register_b => if_id_insn(7 downto 4),    -- Rt
+
+            read_register_a => sig_read_reg_a,
+            read_register_b => sig_read_reg_b,
+            read_register_c => "0010",
+            read_register_d => "0100",
+
             write_enable    => mem_wb_reg_write,
             write_register  => mem_wb_wreg,
             write_data      => sig_wb_data,
             read_data_a     => sig_rd_a,
-            read_data_b     => sig_rd_b
+            read_data_b     => sig_rd_b,
+            read_data_c     => sig_rd_c,
+            read_data_d     => sig_rd_d
         );
 
     -- Sign extend
@@ -466,15 +524,20 @@ begin
             id_ex_rs_idx     <= (others => '0'); 
             id_ex_rt_idx     <= (others => '0'); 
             id_ex_switches   <= (others => '0');
+            id_ex_jump_target <= (others => '0');
             id_ex_reg_write  <= '0'; id_ex_alu_src    <= '0';
             id_ex_alu_mode   <= '0'; id_ex_mem_write  <= '0';
             id_ex_mem_to_reg <= '0'; id_ex_in_to_reg  <= '0';
             id_ex_out_enable <= '0'; id_ex_branch     <= '0';
             id_ex_dis_enable <= '0'; id_ex_is_poll    <= '0';
+            id_ex_sub_enable <= '0';
+            id_ex_slt_enable <= '0';
+            id_ex_jump       <= '0';
+            
 
         elsif rising_edge(sig_slow_clk) then
 
-            if sig_branch_taken = '1' then
+            if sig_control_redirect = '1' then
                 ---------------------------------------------------------------
                 -- SQUASH: branch taken
                 -- Clear all control signals instruction becomes a bubble.
@@ -489,6 +552,10 @@ begin
                 id_ex_wreg       <= (others => '0');
                 id_ex_rs_idx     <= (others => '0');
                 id_ex_rt_idx     <= (others => '0');
+                id_ex_jump_target <= (others => '0');
+                id_ex_sub_enable <= '0';
+                id_ex_slt_enable <= '0';
+                id_ex_jump       <= '0';
 
             elsif sig_stall = '1' then
                 ---------------------------------------------------------------
@@ -507,6 +574,10 @@ begin
                 id_ex_wreg       <= (others => '0');
                 id_ex_rs_idx     <= (others => '0');
                 id_ex_rt_idx     <= (others => '0');
+                id_ex_jump_target <= (others => '0');
+                id_ex_sub_enable <= '0';
+                id_ex_slt_enable <= '0';
+                id_ex_jump       <= '0';
 
             else
                 ---------------------------------------------------------------
@@ -517,6 +588,7 @@ begin
                 id_ex_rd_b       <= sig_rd_b;
                 id_ex_sign_ext   <= sig_sign_ext;
                 id_ex_imme       <= if_id_insn(3 downto 0);
+                id_ex_jump_target <= if_id_insn(7 downto 0);
                 id_ex_wreg       <= sig_wreg_id;
                 id_ex_rs_idx     <= sig_rs_idx; 
                 id_ex_rt_idx     <= sig_rt_idx; 
@@ -530,6 +602,9 @@ begin
                 id_ex_out_enable <= sig_out_enable;
                 id_ex_branch     <= sig_branch;
                 id_ex_dis_enable <= sig_dis_enable;
+                id_ex_sub_enable <= sig_sub_enable;
+                id_ex_slt_enable <= sig_slt_enable;
+                id_ex_jump       <= sig_jump;
                 -- flag POLL instruction (if/else required inside a process)
                 if if_id_insn(15 downto 12) = OP_POLL then
                     id_ex_is_poll <= '1';
@@ -550,7 +625,8 @@ begin
     ---------------------------------------------------------------------------
     cop_start <= '1' when (if_id_insn(15 downto 12) = OP_SPECIAL
                            and sig_stall = '0'
-                           and sig_branch_taken = '0')
+                           and sig_control_redirect = '0'
+                           and cop_busy = '0')
                  else '0';
 
     cop_op   <= if_id_insn(29 downto 28);          -- from upper 16 bits
@@ -558,12 +634,12 @@ begin
     -- The register file outputs sig_rd_a (Rs=R1..R4) during the SAME cycle
     -- as decode.  We use combinational reads from the reg file to get all
     -- four calling-convention registers.  For simplicity we read them via
-    -- the two read ports in consecutive cycles (the coprocessor latches on
-    -- start). 
+    -- For OP_SPECIAL, the four register file read ports provide:
+    -- R1 = srcB, R2 = srcC, R3 = dst, R4 = size.
     cop_dst  <= sig_rd_a(7 downto 0);   -- R3 (port A reads Rs = insn[11:8])
     cop_srcB <= sig_rd_b(7 downto 0);   -- R1 (port B reads Rt = insn[7:4])
-    cop_srcC <= (others => '0');         -- R2: would need a 3rd read port
-    cop_size <= (others => '0');         -- R4: would need a 4th read port
+    cop_srcC <= sig_rd_c(7 downto 0);         -- R2: would need a 3rd read port
+    cop_size <= sig_rd_d(7 downto 0);         -- R4: would need a 4th read port
     
     ---------------------------------------------------------------------------
     -- STAGE 3 : EX  -  ALU Operation and Branch Resolution
@@ -635,6 +711,20 @@ begin
             carry_out => sig_alu_carry
         );
 
+    simplealu : simple_alu
+        port map(
+            src_a  => sig_alu_a,
+            src_b  => sig_alu_b_fwd,
+            is_slt => id_ex_slt_enable,
+            result => sig_simple_result
+        );
+
+    -- Select the result from the correct ALU
+    sig_final_result <= sig_simple_result
+                        when (id_ex_sub_enable = '1' or
+                            id_ex_slt_enable = '1')
+                        else sig_alu_result;
+
     ---------------------------------------------------------------------------
     -- LOAD-USE HAZARD DETECTION 
     -- Condition:
@@ -666,7 +756,12 @@ begin
     -- sig_imme_ext zero-extends the 4-bit immediate to 8-bit so it can be
     -- passed into the adder_8b port map as a named signal
     ---------------------------------------------------------------------------
-    sig_imme_ext <= "0000" & id_ex_imme; 
+    -- sig_imme_ext <= "0000" & id_ex_imme; 
+    sig_imme_ext <= "1111" & id_ex_imme
+    when id_ex_imme(3) = '1'
+    else "0000" & id_ex_imme;
+
+    sig_control_redirect <= sig_branch_taken or id_ex_jump;
 
     add_branch : adder_8b
         port map (
@@ -677,7 +772,7 @@ begin
         );
 
     -- BNE comparator:
-    sig_not_equal   <= '1' when (id_ex_rd_a /= id_ex_rd_b) else '0';
+    sig_not_equal   <= '1' when (sig_alu_a /= sig_alu_b_fwd) else '0';
     sig_branch_taken <= id_ex_branch and sig_not_equal;
 
     ---------------------------------------------------------------------------
@@ -703,9 +798,9 @@ begin
             if id_ex_is_poll = '1' then
                 ex_mem_alu_result <= "000000000000000" & cop_done;
             else
-                ex_mem_alu_result <= sig_alu_result;
+                ex_mem_alu_result <= sig_final_result;
             end if;
-            ex_mem_rd_b       <= id_ex_rd_b;
+            ex_mem_rd_b       <= sig_alu_b_fwd;
             ex_mem_wreg       <= id_ex_wreg;
             ex_mem_switches   <= id_ex_switches;
             ex_mem_reg_write  <= id_ex_reg_write;
@@ -795,6 +890,13 @@ begin
     sig_wb_data <= mem_wb_switches   when mem_wb_in_to_reg  = '1' else
                    mem_wb_dmem_out   when mem_wb_mem_to_reg = '1' else
                    mem_wb_alu_result;
+
+
+    -- Data read from the shared DMEM for the coprocessor
+    cop_read_data <= sig_dmem_out;
+
+    -- Use the same clock for the CPU, DMEM and coprocessor
+    cop_clk_out <= sig_slow_clk;
 
     ---------------------------------------------------------------------------
     -- Board outputs 
