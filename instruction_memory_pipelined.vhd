@@ -29,36 +29,30 @@
 ---------------------------------------------------------------------------
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.numeric_std.ALL;
 
 entity instruction_memory_pipelined is
     port (
         addr_in  : in  std_logic_vector(7 downto 0);
-        insn_out : out std_logic_vector(31 downto 0)
+        insn_out : out std_logic_vector(31 downto 0);
+        
+        transfer_addr   : in std_logic_vector(7 downto 0);
+        transfer_data   : out std_logic_vector(31 downto 0)
     );
 end instruction_memory_pipelined;
 
 architecture behavioral of instruction_memory_pipelined is
+
+    type mem_array is array (0 to 255) of std_logic_vector(31 downto 0);
+    
+    constant imem : mem_array := (
+        0 => X"00000000",
+        1 => X"00000000",
+        2 => X"00000000",
+        3 => X"00000000",
+        others => X"00000000"    
+    );
 begin
-    process(addr_in)
-    begin
-        case addr_in is
-            
-            when X"00" => insn_out <= X"00005010"; -- IN   $1
-            when X"01" => insn_out <= X"00001021"; -- LOAD $2, $0, 1
-            when X"02" => insn_out <= X"00001040"; -- LOAD $4, $0, 0
-            when X"03" => insn_out <= X"00000000"; -- NOOP
-            when X"04" => insn_out <= X"00004126"; -- BNE  $1,$2,6
-            when X"05" => insn_out <= X"00000000"; -- NOOP
-            when X"06" => insn_out <= X"00000000"; -- NOOP
-            when X"07" => insn_out <= X"00006040"; -- OUT  $4(not-taken path)
-            when X"08" => insn_out <= X"00004204"; -- BNE  $2,$0,4
-            when X"09" => insn_out <= X"00000000"; -- NOOP
-            when X"0A" => insn_out <= X"00000000"; -- NOOP
-            when X"0B" => insn_out <= X"00006020"; -- OUT  $2(taken path)
-            when X"0C" => insn_out <= X"00000000"; -- NOOP
-            when X"0D" => insn_out <= X"00007124"; -- DIS  $2,$1,4
-       
-            when others => insn_out <= X"00000000"; -- NOOP
-        end case;
-    end process;
+    insn_out <= imem(TO_INTEGER(unsigned(addr_in)));
+    transfer_data <= imem(TO_INTEGER(unsigned(transfer_addr)));
 end behavioral;
