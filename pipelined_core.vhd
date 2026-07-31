@@ -77,10 +77,9 @@ entity pipelined_core is
         cop_done     : in  std_logic;
           
         cop_busy         : in  std_logic;
-        cop_addr_in      : in  std_logic_vector(3 downto 0);
+        cop_addr_in      : in  std_logic_vector(9 downto 0);
         cop_write_data   : in  std_logic_vector(15 downto 0);
-        cop_write_enable : in  std_logic
-            
+        cop_write_enable : in  std_logic           
     );
 end pipelined_core;
 
@@ -89,7 +88,9 @@ architecture pipelined of pipelined_core is
     -- CHANGED FROM LAB 3: addr_in widened to 8-bit, insn_out widened to 32-bit
     component instruction_memory_pipelined is
         port ( addr_in  : in  std_logic_vector(7 downto 0);
-               insn_out : out std_logic_vector(31 downto 0) );
+               insn_out : out std_logic_vector(31 downto 0);
+               transfer_addr   : in std_logic_vector(7 downto 0);
+               transfer_data   : out std_logic_vector(31 downto 0));
     end component;
 
     component control_unit is
@@ -137,9 +138,35 @@ architecture pipelined of pipelined_core is
         port ( reset : in std_logic; clk : in std_logic;
                write_enable : in std_logic;
                write_data   : in std_logic_vector(15 downto 0);
-               addr_in      : in std_logic_vector(3 downto 0);
-               data_out     : out std_logic_vector(15 downto 0) );
+               addr_in      : in std_logic_vector(9 downto 0);
+               data_out     : out std_logic_vector(15 downto 0);
+               cop_busy         : in std_logic;
+               cop_write_enable : in std_logic;
+               cop_write_data   : in std_logic_vector(15 downto 0);
+               cop_addr_in      : in std_logic_vector(9 downto 0);
+               transfer_busy         : in std_logic;
+               transfer_write_enable : in std_logic;
+               transfer_write_data   : in std_logic_vector(15 downto 0);
+               transfer_addr_in      : in std_logic_vector(9 downto 0));
     end component;
+
+    component memory_transfer is
+        port (
+            clk   : in std_logic;
+            reset : in std_logic;
+            start : in std_logic;
+    
+            imem_addr : out std_logic_vector(7 downto 0);
+            imem_data : in  std_logic_vector(31 downto 0);
+            transfer_size : in std_logic_vector(9 downto 0);
+    
+            dmem_addr            : out std_logic_vector(9 downto 0);
+            dmem_write_data      : out std_logic_vector(15 downto 0);
+            dmem_write_enable    : out std_logic;
+    
+            busy : out std_logic;
+            done : out std_logic  );
+     end component;
 
     ---------------------------------------------------------------------------
     -- Opcode constants
@@ -264,6 +291,18 @@ architecture pipelined of pipelined_core is
     signal sig_refresh_counter : std_logic_vector(16 downto 0) := (others => '0');
     signal sig_digit_select    : std_logic_vector(1 downto 0);
     signal sig_digit_value     : std_logic_vector(3 downto 0);
+    
+    ---------------------------------------------------------------------------------
+    -- Signals for data transfer
+    --------------------------------------------------------------------------------
+    signal sig_transfer_addr        : std_logic_vector(9 downto 0);
+    signal sig_transfer_write_data  : std_logic_vector(15 downto 0);
+    signal sig_transfer_write_enable: std_logic;
+    signal sig_transfer_busy        : std_logic;
+    signal sig_transfer_done        : std_logic ;
+    
+    signal sig_transfer_imem_addr   : std_logic_vector(7 downto 0);
+    signal sig_transfer_imem_data   : std_logic_vector(31 downto 0);
 
 begin
 
@@ -320,8 +359,27 @@ begin
     insn_mem : instruction_memory_pipelined
         port map (
             addr_in  => sig_pc,
-            insn_out => sig_insn_if
-        );
+            insn_out => sig_insn_if,
+
+            transfer_addr => sig_transfer_imem_addr,
+            transfer_data => sig_transfer_imem_data  );
+    
+    -- data transfer from IMEM to DMEM
+    transfer_mem : memory_transfer
+        port map ( clk             => sig_slow_clk,
+            reset           => reset,
+            start           => '1',
+            transfer_size   => "0000000100", -- temp value for test purpose
+        
+            imem_addr       => sig_transfer_imem_addr,
+            imem_data       => sig_transfer_imem_data,
+        
+            dmem_addr         => sig_transfer_addr,
+            dmem_write_data   => sig_transfer_write_data,
+            dmem_write_enable => sig_transfer_write_enable,
+        
+            busy            => sig_transfer_busy,
+            done            => sig_transfer_done );
 
     ---------------------------------------------------------------------------
     -- IF/ID Pipeline Register
@@ -668,8 +726,20 @@ begin
             clk          => sig_slow_clk,
             write_enable => ex_mem_mem_write,
             write_data   => ex_mem_rd_b,
-            addr_in      => ex_mem_alu_result(3 downto 0),
-            data_out     => sig_dmem_out
+            addr_in      => ex_mem_alu_result(9 downto 0),
+            data_out     => sig_dmem_out,
+
+            -- co-processor
+            cop_busy    => cop_busy,
+            cop_write_enable => cop_write_enable,
+            cop_write_data  => cop_write_data,
+            cop_addr_in => cop_addr_in,
+            
+            -- IMEM to DMEM transfer
+            transfer_busy   => sig_transfer_busy,
+            transfer_write_enable => sig_transfer_write_enable,
+            transfer_write_data => sig_transfer_write_data,
+            transfer_addr_in    => sig_transfer_addr        
         );
 
     output_register : process(reset, sig_slow_clk)
