@@ -62,10 +62,12 @@ entity pipelined_core is
         reset    : in  std_logic;
         clk      : in  std_logic;
         switches : in  std_logic_vector(15 downto 0);
-        btn_disp : in  std_logic;
-        leds     : out std_logic_vector(15 downto 0);
-        seg      : out std_logic_vector(6 downto 0);
-        an       : out std_logic_vector(3 downto 0);
+        
+        -- board output signals
+        output_reg_out : out std_logic_vector(15 downto 0);
+        cop1_out       : out std_logic_vector(15 downto 0);
+        cop2_out       : out std_logic_vector(15 downto 0);
+        flag_out       : out std_logic;
         
         -- Coprocessor interface
         cop_start    : out std_logic;
@@ -899,41 +901,11 @@ begin
     cop_clk_out <= sig_slow_clk;
 
     ---------------------------------------------------------------------------
-    -- Board outputs 
+    -- Board output signals - display output logic MOVED to board_wrapper
     ---------------------------------------------------------------------------
-    leds(15)          <= sig_flag;
-    leds(14 downto 0) <= sig_output_register(14 downto 0);
-
-    refresh : process(clk)
-    begin
-        if rising_edge(clk) then
-            sig_refresh_counter <= sig_refresh_counter + 1;
-        end if;
-    end process;
-
-    sig_digit_select <= sig_refresh_counter(16 downto 15);
-
-    sig_display_value <= sig_output_register when btn_disp = '0' else
-                         sig_cop1(7 downto 0) & sig_cop2(7 downto 0);
-
-    with sig_digit_select select
-        sig_digit_value <= sig_display_value(3 downto 0)   when "00",
-                           sig_display_value(7 downto 4)   when "01",
-                           sig_display_value(11 downto 8)  when "10",
-                           sig_display_value(15 downto 12) when others;
-
-    with sig_digit_select select
-        an <= "1110" when "00", "1101" when "01",
-              "1011" when "10", "0111" when others;
-
-    with sig_digit_value select
-        seg <= "1000000" when "0000", "1111001" when "0001",
-               "0100100" when "0010", "0110000" when "0011",
-               "0011001" when "0100", "0010010" when "0101",
-               "0000010" when "0110", "1111000" when "0111",
-               "0000000" when "1000", "0010000" when "1001",
-               "0001000" when "1010", "0000011" when "1011",
-               "1000110" when "1100", "0100001" when "1101",
-               "0000110" when "1110", "0001110" when others;
+    output_reg_out <= sig_output_register;
+    cop1_out       <= sig_cop1;
+    cop2_out       <= sig_cop2;
+    flag_out       <= sig_flag;
 
 end pipelined;
