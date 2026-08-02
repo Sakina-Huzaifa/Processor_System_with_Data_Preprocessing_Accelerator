@@ -11,9 +11,11 @@ entity processor_system is
         switches : in  std_logic_vector(15 downto 0);
         btn_disp : in  std_logic;
 
-        leds     : out std_logic_vector(15 downto 0);
-        seg      : out std_logic_vector(6 downto 0);
-        an       : out std_logic_vector(3 downto 0);
+        -- board output signals
+        output_reg_out : out std_logic_vector(15 downto 0);
+        cop1_out       : out std_logic_vector(15 downto 0);
+        cop2_out       : out std_logic_vector(15 downto 0);
+        flag_out       : out std_logic;
 
         -- Useful system status signals for simulation
         cop_busy_out : out std_logic;
@@ -76,9 +78,10 @@ begin
             switches => switches,
             btn_disp => btn_disp,
 
-            leds => leds,
-            seg  => seg,
-            an   => an,
+            output_reg_out => output_reg_out,
+            cop1_out => cop1_out,
+            cop2_out => cop2_out,
+            flag_out => flag_out,
 
             cop_start => sig_cop_start,
             cop_op    => sig_cop_op,
