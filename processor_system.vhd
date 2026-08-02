@@ -76,7 +76,6 @@ begin
             reset    => reset,
             clk      => clk,
             switches => switches,
-            btn_disp => btn_disp,
 
             output_reg_out => output_reg_out,
             cop1_out => cop1_out,
